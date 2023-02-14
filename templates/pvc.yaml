@@ -1,0 +1,18 @@
+{{- if .Values.persistentVolume.enabled }}
+{{- $fullName := include "pgadmin.fullname" . -}}
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: {{ $fullName }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "pgadmin.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- .Values.persistentVolume.accessModes | toYaml | nindent 4 }}
+  storageClassName: hostpath
+  resources:
+    requests:
+      storage: {{ .Values.persistentVolume.size }}
+  volumeMode: Filesystem
+{{- end }}

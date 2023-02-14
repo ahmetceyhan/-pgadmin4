@@ -1,0 +1,109 @@
+{{- $fullName := include "pgadmin.fullname" . -}}
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: {{ $fullName }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/instance: {{ $fullName }}
+    app.kubernetes.io/name: {{ $fullName }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $fullName }}
+      app.kubernetes.io/name: {{ $fullName }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ $fullName }}
+        app.kubernetes.io/name: {{ $fullName }}
+    spec:
+      volumes:
+        - name: {{ $fullName }}-data
+          persistentVolumeClaim:
+            claimName: {{ if .Values.persistentVolume.existingClaim }}{{ .Values.persistentVolume.existingClaim }}{{- else }}{{ $fullName }}{{- end }}
+      {{- if .Values.serverDefinitions.enabled }}
+        - name: definitions
+          secret:
+            secretName: {{ template "pgadmin.name" . }}
+            items:
+            - key: servers.json
+              path: servers.json
+            defaultMode: 420
+      {{- end }}
+      initContainers:
+        - name: init-pgadmin
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command:
+            - /bin/chown
+            - '-R'
+            - '5050:5050'
+            - /var/lib/pgadmin
+          resources: {}
+          volumeMounts:
+            - name: {{ $fullName }}-data
+              mountPath: /var/lib/pgadmin
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            runAsUser: 0
+      containers:
+        - name: {{ $fullName }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            - name: PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION
+              value: !!string {{ .Values.env.enhanced_cookie_protection }}
+            - name: PGADMIN_DEFAULT_EMAIL
+              value: {{ .Values.env.email }}
+            - name: PGADMIN_DEFAULT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $fullName }}
+                  key: password
+          resources: {}
+          volumeMounts:
+            - name: {{ $fullName }}-data
+              mountPath: /var/lib/pgadmin
+          {{- if .Values.serverDefinitions.enabled }}
+            - name: definitions
+              mountPath: /pgadmin4/servers.json
+              subPath: servers.json
+          {{- end }}
+          {{- if .Values.livenessProbe }}
+          livenessProbe:
+            httpGet:
+              path: /misc/ping
+              port: 80
+            {{- .Values.livenessProbe | toYaml | nindent 12 }}
+          {{- end }}
+          {{- if .Values.readinessProbe }}
+          readinessProbe:
+            httpGet:
+              path: /misc/ping
+              port: 80
+            {{- .Values.readinessProbe | toYaml | nindent 12 }}
+          {{- end }}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+   {{- if .Values.securityContext }}
+      securityContext:
+        {{- .Values.securityContext | toYaml | nindent 8 }}
+    {{- end }}
+      schedulerName: default-scheduler
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  revisionHistoryLimit: 2
+  progressDeadlineSeconds: 600
